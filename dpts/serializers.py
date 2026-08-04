@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 from .models import Department
 
@@ -10,7 +11,10 @@ def serialize_image_value(image_field):
         return image_field
 
     try:
-        return image_field.url
+        url = image_field.url
+        if url.startswith("/") and settings.PUBLIC_URL:
+            return f"{settings.PUBLIC_URL}{url}"
+        return url
     except Exception:
         return None
 

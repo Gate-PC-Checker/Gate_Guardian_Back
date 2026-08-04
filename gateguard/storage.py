@@ -53,11 +53,13 @@ class CloudinaryOrLocalStorage(MediaCloudinaryStorage):
 
     def url(self, name):
         if not self._use_cloudinary:
-            return self._fallback_storage.url(name)
+            relative = self._fallback_storage.url(name)
+            return f"{settings.PUBLIC_URL}{relative}" if settings.PUBLIC_URL else relative
         try:
             return super().url(name)
         except Exception:
-            return self._fallback_storage.url(name)
+            relative = self._fallback_storage.url(name)
+            return f"{settings.PUBLIC_URL}{relative}" if settings.PUBLIC_URL else relative
 
     def delete(self, name):
         if not self._use_cloudinary:
