@@ -6,7 +6,7 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt"]
+        fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "profile_image"]
         read_only_fields = ["id", "role"]
 
 
@@ -15,7 +15,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "password"]
+        fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "password", "profile_image"]
 
     def create(self, validated_data):
         password = validated_data.pop("password")
@@ -23,6 +23,23 @@ class CreateUserSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+
+
+class MeProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone",
+            "role",
+            "dpt",
+            "profile_image",
+        ]
+        read_only_fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt"]
 
 
 class GateGuardTokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -1,7 +1,10 @@
 from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import User
-from .serializers import CreateUserSerializer, GateGuardTokenObtainPairSerializer
+from .serializers import CreateUserSerializer, GateGuardTokenObtainPairSerializer, MeProfileSerializer
 from .permissions import IsSuperAdmin, IsSuperAdminOrDPTAdmin
 
 
@@ -33,3 +36,21 @@ class UserListView(generics.ListAPIView):
         if requester.is_super_admin:
             return User.objects.all().order_by("-date_joined")
         return User.objects.filter(dpt=requester.dpt).order_by("-date_joined")
+
+
+class MeProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = MeProfileSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+
+    def update(self, request, *args, **kwargs):
+        allowed_fields = {"profile_image"}
+        sent_fields = set(request.data.keys())
+        if sent_fields and not sent_fields.issubset(allowed_fields):
+            return Response(
+                {"detail": "Only profile_image can be updated from this endpoint."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)

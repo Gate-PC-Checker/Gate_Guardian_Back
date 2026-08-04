@@ -21,6 +21,7 @@ class User(AbstractUser):
         help_text="Required for DPT_ADMIN and EMPLOYEE roles",
     )
     phone = models.CharField(max_length=20, blank=True)
+    profile_image = models.ImageField(upload_to="users/profile_images/", blank=True, null=True)
 
     def __str__(self):
         return f"{self.username} ({self.role})"

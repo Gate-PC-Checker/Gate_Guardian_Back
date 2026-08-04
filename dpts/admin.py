@@ -4,5 +4,6 @@ from .models import Department
 
 @admin.register(Department)
 class DepartmentAdmin(admin.ModelAdmin):
-    list_display = ["name", "code", "created_at"]
+    list_display = ["name", "code", "status", "profile_image", "created_at"]
+    list_filter = ["status"]
     search_fields = ["name", "code"]

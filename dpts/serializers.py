@@ -8,7 +8,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Department
-        fields = ["id", "name", "code", "created_at", "member_count", "device_count"]
+        fields = ["id", "name", "code", "status", "profile_image", "created_at", "member_count", "device_count"]
 
     def get_member_count(self, obj):
         return obj.members.count()
