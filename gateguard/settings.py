@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import timedelta
 from decouple import config, Csv
 import dj_database_url
+import cloudinary
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -93,10 +94,21 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Cloudinary (image storage: QR codes + scan evidence photos) ---
+_CLOUDINARY_URL = config("CLOUDINARY_URL", default="")
+if _CLOUDINARY_URL:
+    cloudinary.config(cloudinary_url=_CLOUDINARY_URL, secure=True)
+else:
+    cloudinary.config(
+        cloud_name=config("CLOUDINARY_CLOUD_NAME", default=""),
+        api_key=config("CLOUDINARY_API_KEY", default=""),
+        api_secret=config("CLOUDINARY_API_SECRET", default=""),
+        secure=True,
+    )
+
 CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": config("CLOUDINARY_CLOUD_NAME", default=""),
-    "API_KEY": config("CLOUDINARY_API_KEY", default=""),
-    "API_SECRET": config("CLOUDINARY_API_SECRET", default=""),
+    "CLOUD_NAME": cloudinary.config().cloud_name,
+    "API_KEY": cloudinary.config().api_key,
+    "API_SECRET": cloudinary.config().api_secret,
 }
 
 # Django 5+ uses STORAGES; keep DEFAULT_FILE_STORAGE fallback for compatibility.

@@ -16,11 +16,7 @@ services:
         value: .onrender.com
       - key: DATABASE_URL
         sync: false
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
+      - key: CLOUDINARY_URL
         sync: false
       - key: CORS_ALLOW_ALL_ORIGINS
         value: False
