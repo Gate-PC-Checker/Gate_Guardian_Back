@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GateGuard — Guard Scanner</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; background: #111; color: #eee; }
+  h1 { font-size: 18px; }
+  #reader { width: 100%; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+  .card { background: #1c1c1c; border-radius: 12px; padding: 16px; margin-top: 12px; }
+  .alert { background: #4a1313; border: 1px solid #a32d2d; }
+  button { width: 100%; padding: 12px; margin-top: 8px; border-radius: 8px; border: none; font-size: 16px; }
+  .approve { background: #27500a; color: #eaf3de; }
+  .deny { background: #791f1f; color: #fcebeb; }
+  input[type=text], input[type=password] { width: 100%; padding: 10px; margin-bottom: 8px; border-radius: 8px; border: 1px solid #444; background: #222; color: #eee; }
+</style>
+</head>
+<body>
+<h1>GateGuard — Guard scanner</h1>
+
+<div id="login-box">
+  <input type="text" id="username" placeholder="Guard username">
+  <input type="password" id="password" placeholder="Password">
+  <button onclick="login()">Log in</button>
+  <p id="login-status" style="font-size:13px;color:#999;"></p>
+</div>
+
+<div id="scan-box" style="display:none;">
+  <div id="reader"></div>
+  <div id="result"></div>
+</div>
+
+<script>
+const API_BASE = window.location.origin + "/api";
+let accessToken = null;
+let currentToken = null;
+
+async function login() {
+  const username = document.getElementById("username").value;
+  const password = document.getElementById("password").value;
+  const res = await fetch(API_BASE + "/auth/login/", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({username, password})
+  });
+  const data = await res.json();
+  if (res.ok && data.role === "GUARD") {
+    accessToken = data.access;
+    document.getElementById("login-box").style.display = "none";
+    document.getElementById("scan-box").style.display = "block";
+    startScanner();
+  } else {
+    document.getElementById("login-status").textContent = "Login failed or not a Guard account.";
+  }
+}
+
+function startScanner() {
+  const scanner = new Html5Qrcode("reader");
+  scanner.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: 250 },
+    (decodedText) => {
+      scanner.pause();
+      currentToken = decodedText;
+      lookupDevice(decodedText, scanner);
+    }
+  );
+}
+
+async function lookupDevice(qrToken, scanner) {
+  const res = await fetch(`${API_BASE}/devices/lookup/${qrToken}/`, {
+    headers: {"Authorization": "Bearer " + accessToken}
+  });
+  const data = await res.json();
+  const el = document.getElementById("result");
+  if (!res.ok) {
+    el.innerHTML = `<div class="card alert"><p>Device not found.</p></div>
+      <button onclick="resume('${qrToken}', scanner)">Scan again</button>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="card ${data.stolen_alert ? 'alert' : ''}">
+      ${data.stolen_alert ? '<p><strong>STOLEN DEVICE — DO NOT APPROVE</strong></p>' : ''}
+      <p><strong>${data.asset_tag}</strong> — ${data.brand || ''} ${data.model_name || ''}</p>
+      <p>Owner: ${data.owner_name || data.owner_username}</p>
+      <p>Dept: ${data.dpt_name}</p>
+      <button class="approve" onclick="submitDecision('APPROVED')">Approve exit</button>
+      <button class="deny" onclick="submitDecision('DENIED')">Deny exit</button>
+    </div>
+  `;
+}
+
+async function submitDecision(result) {
+  const res = await fetch(`${API_BASE}/scans/`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Authorization": "Bearer " + accessToken},
+    body: JSON.stringify({qr_token: currentToken, result})
+  });
+  const data = await res.json();
+  document.getElementById("result").innerHTML = `<div class="card"><p>Logged: ${data.result}</p>
+    <button onclick="location.reload()">Scan next</button></div>`;
+}
+</script>
+</body>
+</html>
