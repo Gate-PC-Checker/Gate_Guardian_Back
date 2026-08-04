@@ -91,6 +91,8 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Cloudinary (image storage: QR codes + scan evidence photos) ---
@@ -111,16 +113,16 @@ CLOUDINARY_STORAGE = {
     "API_SECRET": cloudinary.config().api_secret,
 }
 
-# Django 5+ uses STORAGES; keep DEFAULT_FILE_STORAGE fallback for compatibility.
+# Django 5+ uses STORAGES; keep fallback to a storage class that can use local media if Cloudinary auth fails.
 STORAGES = {
     "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        "BACKEND": "gateguard.storage.CloudinaryOrLocalStorage",
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+DEFAULT_FILE_STORAGE = "gateguard.storage.CloudinaryOrLocalStorage"
 
 # --- DRF + JWT ---
 REST_FRAMEWORK = {
