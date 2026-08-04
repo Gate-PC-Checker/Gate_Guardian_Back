@@ -1,4 +1,3 @@
-import base64
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User
@@ -10,15 +9,6 @@ def serialize_image_value(image_field):
 
     if isinstance(image_field, str):
         return image_field
-
-    try:
-        if image_field.name:
-            with image_field.storage.open(image_field.name, "rb") as fh:
-                data = fh.read()
-            content_type = getattr(image_field.file, "content_type", "image/png") or "image/png"
-            return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
-    except Exception:
-        pass
 
     try:
         return image_field.url
