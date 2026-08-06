@@ -2,6 +2,7 @@ from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import User
 from .serializers import CreateUserSerializer, GateGuardTokenObtainPairSerializer, MeProfileSerializer
@@ -22,7 +23,12 @@ class UserCreateView(generics.CreateAPIView):
     def perform_create(self, serializer):
         requester = self.request.user
         if requester.is_dpt_admin:
-            serializer.save(role=User.Role.EMPLOYEE, dpt=requester.dpt)
+            requested_role = self.request.data.get("role", User.Role.EMPLOYEE)
+            if requested_role not in {User.Role.EMPLOYEE, User.Role.GUARD}:
+                raise ValidationError({"role": "Department admins can only create EMPLOYEE or GUARD users."})
+
+            role = User.Role.GUARD if requested_role == User.Role.GUARD else User.Role.EMPLOYEE
+            serializer.save(role=role, dpt=requester.dpt)
         else:
             serializer.save()
 

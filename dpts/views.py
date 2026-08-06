@@ -1,10 +1,25 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from accounts.permissions import IsSuperAdmin
 from .models import Department
-from .serializers import DepartmentSerializer
+from .serializers import DepartmentRegisterSerializer, DepartmentSerializer
+
+
+class DepartmentRegisterView(generics.CreateAPIView):
+    serializer_class = DepartmentRegisterSerializer
+    permission_classes = [IsSuperAdmin]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+        department = result["department"]
+        return Response(
+            DepartmentSerializer(department).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):

@@ -1,6 +1,7 @@
 from rest_framework import viewsets, generics, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import IsSuperAdminOrDPTAdmin, IsEmployee, IsGuard
 from .models import PC
 from .serializers import PCSerializer, PCLookupSerializer
@@ -51,3 +52,19 @@ class PCLookupByTokenView(generics.RetrieveAPIView):
         data = self.get_serializer(instance).data
         data["stolen_alert"] = instance.status == PC.Status.STOLEN
         return Response(data, status=status.HTTP_200_OK)
+
+
+class ReportLostDeviceView(generics.UpdateAPIView):
+    """Employee reports their own device as lost/stolen."""
+    serializer_class = PCSerializer
+    permission_classes = [IsAuthenticated, IsEmployee]
+    queryset = PC.objects.select_related("owner", "dpt").all()
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.owner_id != request.user.id:
+            raise PermissionDenied("You can only report your own device.")
+
+        instance.status = PC.Status.STOLEN
+        instance.save(update_fields=["status", "updated_at"])
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
