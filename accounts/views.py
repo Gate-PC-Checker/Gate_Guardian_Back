@@ -33,6 +33,17 @@ class UserCreateView(generics.CreateAPIView):
             serializer.save()
 
 
+class GuardCreateView(UserCreateView):
+    """Department Admin creates guard accounts with a fixed GUARD role."""
+
+    def perform_create(self, serializer):
+        requester = self.request.user
+        if not requester.is_dpt_admin:
+            raise ValidationError({"detail": "Only department admins can create guards."})
+
+        serializer.save(role=User.Role.GUARD, dpt=requester.dpt)
+
+
 class UserListView(generics.ListAPIView):
     serializer_class = CreateUserSerializer
     permission_classes = [IsSuperAdminOrDPTAdmin]
