@@ -162,3 +162,11 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="GateGuard <noreply@gateguard.com>")
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:8080")
 
+# Fix macOS Python SSL cert verification for SMTP email sending
+try:
+    import certifi
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+except ImportError:
+    pass
+
+

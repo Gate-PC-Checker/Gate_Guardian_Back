@@ -276,13 +276,17 @@ class ForgotPasswordResetView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = User.objects.filter(username__iexact=identifier).first()
-        if not user and email:
-            user = User.objects.filter(email__iexact=email).first()
+        # Flexible account lookup by username, email, or department code
+        user = (
+            User.objects.filter(username__iexact=identifier).first()
+            or User.objects.filter(email__iexact=identifier).first()
+            or User.objects.filter(dpt__code__iexact=identifier, role=User.Role.DPT_ADMIN).first()
+            or (User.objects.filter(email__iexact=email).first() if email else None)
+        )
 
         if not user:
             return Response(
-                {"detail": "No account found matching the provided details."},
+                {"detail": f"No account found matching '{identifier}'."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -292,7 +296,7 @@ class ForgotPasswordResetView(generics.GenericAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if email and user.email and user.email.lower() != email.lower():
+        if email and user.email and user.email.strip().lower() != email.strip().lower():
             return Response(
                 {"detail": "The provided email does not match our records for this ID."},
                 status=status.HTTP_400_BAD_REQUEST,

@@ -2,6 +2,7 @@ from django.conf import settings
 from rest_framework import serializers
 
 from accounts.models import User
+from accounts.views import send_password_setup_email
 from .models import Department
 
 
@@ -72,6 +73,8 @@ class DepartmentRegisterSerializer(serializers.Serializer):
             phone=validated_data.get("phone", ""),
             role=User.Role.DPT_ADMIN,
             dpt=department,
+            must_change_password=True,
         )
         user.save()
+        send_password_setup_email(user)
         return {"department": department, "user": user}

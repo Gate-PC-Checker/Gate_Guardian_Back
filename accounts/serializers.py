@@ -94,14 +94,35 @@ class MeProfileSerializer(serializers.ModelSerializer):
         return ret
 
 
+from django.db import models
+
+
 class GateGuardTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Adds role + user info into the JWT response payload."""
+    """Adds role + user info into the JWT response payload with flexible case-insensitive matching."""
 
     def validate(self, attrs):
+        identifier = attrs.get(self.username_field, "").strip()
+        password = attrs.get("password", "")
+        if identifier and password:
+            # Find matching candidate users by username, email, or department code
+            candidates = User.objects.filter(
+                models.Q(username__iexact=identifier) |
+                models.Q(email__iexact=identifier) |
+                models.Q(dpt__code__iexact=identifier, role=User.Role.DPT_ADMIN)
+            )
+            for candidate in candidates:
+                if candidate.check_password(password):
+                    attrs[self.username_field] = candidate.username
+                    break
+
         data = super().validate(attrs)
         data["role"] = self.user.role
         data["user_id"] = str(self.user.id)
         data["username"] = self.user.username
+        data["first_name"] = self.user.first_name
+        data["last_name"] = self.user.last_name
+        data["email"] = self.user.email
+        data["profile_image"] = serialize_image_value(self.user.profile_image)
         data["dpt_id"] = str(self.user.dpt_id) if self.user.dpt_id else None
         data["dpt_name"] = self.user.dpt.name if self.user.dpt else None
         data["dpt_code"] = self.user.dpt.code if self.user.dpt else None
