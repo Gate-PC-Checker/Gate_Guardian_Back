@@ -24,7 +24,7 @@ def serialize_image_value(image_field):
 class DepartmentSerializer(serializers.ModelSerializer):
     member_count = serializers.SerializerMethodField()
     device_count = serializers.SerializerMethodField()
-    profile_image = serializers.SerializerMethodField()
+    profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = Department
@@ -36,8 +36,10 @@ class DepartmentSerializer(serializers.ModelSerializer):
     def get_device_count(self, obj):
         return obj.devices.count()
 
-    def get_profile_image(self, obj):
-        return serialize_image_value(obj.profile_image)
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        return ret
 
 
 class DepartmentRegisterSerializer(serializers.Serializer):

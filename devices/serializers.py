@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from accounts.serializers import serialize_image_value
 from .models import PC
 
 
@@ -53,7 +52,4 @@ class PCLookupSerializer(serializers.ModelSerializer):
         ]
 
     def get_owner_photo(self, obj):
-        """Return the device owner's profile image URL, or None if not set."""
-        if obj.owner is None:
-            return None
-        return serialize_image_value(obj.owner.profile_image)
+        return None  # placeholder: hook up a profile photo field later if needed

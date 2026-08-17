@@ -64,7 +64,7 @@ class MeProfileView(generics.RetrieveUpdateAPIView):
 
     def update(self, request, *args, **kwargs):
         allowed_fields = {"profile_image"}
-        sent_fields = set(request.data.keys())
+        sent_fields = set(request.data.keys()).union(set(request.FILES.keys()))
         if sent_fields and not sent_fields.issubset(allowed_fields):
             return Response(
                 {"detail": "Only profile_image can be updated from this endpoint."},

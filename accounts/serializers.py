@@ -21,17 +21,22 @@ def serialize_image_value(image_field):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    profile_image = serializers.SerializerMethodField()
+    profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
         fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "profile_image"]
         read_only_fields = ["id", "role"]
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        return ret
+
 
 class CreateUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
-    profile_image = serializers.SerializerMethodField()
+    profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -44,12 +49,14 @@ class CreateUserSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
-    def get_profile_image(self, obj):
-        return serialize_image_value(obj.profile_image)
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        return ret
 
 
 class MeProfileSerializer(serializers.ModelSerializer):
-    profile_image = serializers.SerializerMethodField()
+    profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -66,8 +73,10 @@ class MeProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt"]
 
-    def get_profile_image(self, obj):
-        return serialize_image_value(obj.profile_image)
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        return ret
 
 
 class GateGuardTokenObtainPairSerializer(TokenObtainPairSerializer):

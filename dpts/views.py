@@ -33,16 +33,17 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         department = self.get_object()
 
         allowed_fields = {"profile_image"}
-        sent_fields = set(request.data.keys())
+        sent_fields = set(request.data.keys()).union(set(request.FILES.keys()))
         if sent_fields and not sent_fields.issubset(allowed_fields):
             return Response(
                 {"detail": "Only profile_image can be updated from this endpoint."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        image_data = request.FILES.get("profile_image") if "profile_image" in request.FILES else request.data.get("profile_image")
         serializer = self.get_serializer(
             department,
-            data={"profile_image": request.data.get("profile_image")},
+            data={"profile_image": image_data},
             partial=True,
         )
         serializer.is_valid(raise_exception=True)
