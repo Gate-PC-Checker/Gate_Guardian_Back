@@ -7,7 +7,7 @@ from .serializers import ScanLogCreateSerializer, ScanLogSerializer
 
 
 class ScanCreateView(generics.CreateAPIView):
-    """Guard submits an approve/deny decision after scanning a QR."""
+    """Guard submits an approve/deny decision after scanning a QR, with a check-in or check-out type."""
     serializer_class = ScanLogCreateSerializer
     permission_classes = [IsGuard]
 

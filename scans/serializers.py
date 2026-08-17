@@ -8,14 +8,33 @@ class ScanLogCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ScanLog
-        fields = ["id", "qr_token", "result", "photo_evidence", "notes", "scanned_at"]
+        fields = ["id", "qr_token", "scan_type", "result", "photo_evidence", "notes", "scanned_at"]
         read_only_fields = ["id", "scanned_at"]
 
     def validate(self, attrs):
+        # Resolve the device from the QR token
         try:
             attrs["pc"] = PC.objects.get(qr_token=attrs.pop("qr_token"))
         except PC.DoesNotExist:
             raise serializers.ValidationError({"qr_token": "No device found for this QR code."})
+
+        # For CHECK_OUT: verify that the device has a prior approved CHECK_IN
+        if attrs.get("scan_type") == ScanLog.ScanType.CHECK_OUT:
+            has_approved_checkin = ScanLog.objects.filter(
+                pc=attrs["pc"],
+                scan_type=ScanLog.ScanType.CHECK_IN,
+                result=ScanLog.Result.APPROVED,
+            ).exists()
+            if not has_approved_checkin:
+                raise serializers.ValidationError(
+                    {
+                        "scan_type": (
+                            "Cannot check out: this device has no approved check-in on record. "
+                            "The device must be checked in before it can be checked out."
+                        )
+                    }
+                )
+
         return attrs
 
     def create(self, validated_data):
@@ -33,4 +52,7 @@ class ScanLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ScanLog
-        fields = ["id", "pc", "asset_tag", "guard", "guard_username", "result", "photo_evidence", "notes", "scanned_at"]
+        fields = [
+            "id", "pc", "asset_tag", "guard", "guard_username",
+            "scan_type", "result", "photo_evidence", "notes", "scanned_at",
+        ]
