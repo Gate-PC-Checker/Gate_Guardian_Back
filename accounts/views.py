@@ -1,9 +1,10 @@
-from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import generics, serializers
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.contrib.auth import authenticate
 from .models import User
 from .serializers import CreateUserSerializer, GateGuardTokenObtainPairSerializer, MeProfileSerializer
 from .permissions import IsSuperAdmin, IsSuperAdminOrDPTAdmin
@@ -71,3 +72,78 @@ class MeProfileView(generics.RetrieveUpdateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return super().update(request, *args, **kwargs)
+
+
+class ChangePasswordView(generics.GenericAPIView):
+    """Allows an authenticated user (or first-time login) to change their password securely."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        current_password = request.data.get("current_password")
+        new_password = request.data.get("new_password")
+
+        if not new_password or len(new_password) < 6:
+            return Response(
+                {"detail": "New password must be at least 6 characters long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if current_password and not user.check_password(current_password):
+            return Response(
+                {"detail": "Current password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.save()
+        return Response({"detail": "Password updated successfully."})
+
+
+class ForgotPasswordResetView(generics.GenericAPIView):
+    """Allows employees/department admins to reset their password using their registered username/email and ID."""
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        identifier = request.data.get("identifier", "").strip()
+        email = request.data.get("email", "").strip()
+        new_password = request.data.get("new_password", "").strip()
+
+        if not identifier or not new_password:
+            return Response(
+                {"detail": "Please provide your username/ID and a new password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 6:
+            return Response(
+                {"detail": "Password must be at least 6 characters long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(username__iexact=identifier).first()
+        if not user and email:
+            user = User.objects.filter(email__iexact=email).first()
+
+        if not user:
+            return Response(
+                {"detail": "No account found matching the provided details."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Disallow superadmin reset from public endpoint for security
+        if user.is_super_admin:
+            return Response(
+                {"detail": "Super Admin password cannot be reset via this portal."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if email and user.email and user.email.lower() != email.lower():
+            return Response(
+                {"detail": "The provided email does not match our records for this ID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.save()
+        return Response({"detail": "Password reset successfully. You can now log in with your new password."})

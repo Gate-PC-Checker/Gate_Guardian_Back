@@ -21,11 +21,16 @@ def serialize_image_value(image_field):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    dpt_name = serializers.CharField(source="dpt.name", read_only=True)
+    dpt_code = serializers.CharField(source="dpt.code", read_only=True)
     profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "profile_image"]
+        fields = [
+            "id", "username", "first_name", "last_name", "email", "phone",
+            "role", "dpt", "dpt_name", "dpt_code", "profile_image"
+        ]
         read_only_fields = ["id", "role"]
 
     def to_representation(self, instance):
@@ -36,11 +41,16 @@ class UserSerializer(serializers.ModelSerializer):
 
 class CreateUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
+    dpt_name = serializers.CharField(source="dpt.name", read_only=True)
+    dpt_code = serializers.CharField(source="dpt.code", read_only=True)
     profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "password", "profile_image"]
+        fields = [
+            "id", "username", "first_name", "last_name", "email", "phone",
+            "role", "dpt", "dpt_name", "dpt_code", "password", "profile_image"
+        ]
 
     def create(self, validated_data):
         password = validated_data.pop("password")
@@ -56,6 +66,8 @@ class CreateUserSerializer(serializers.ModelSerializer):
 
 
 class MeProfileSerializer(serializers.ModelSerializer):
+    dpt_name = serializers.CharField(source="dpt.name", read_only=True)
+    dpt_code = serializers.CharField(source="dpt.code", read_only=True)
     profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
@@ -69,6 +81,8 @@ class MeProfileSerializer(serializers.ModelSerializer):
             "phone",
             "role",
             "dpt",
+            "dpt_name",
+            "dpt_code",
             "profile_image",
         ]
         read_only_fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt"]
@@ -88,4 +102,6 @@ class GateGuardTokenObtainPairSerializer(TokenObtainPairSerializer):
         data["user_id"] = str(self.user.id)
         data["username"] = self.user.username
         data["dpt_id"] = str(self.user.dpt_id) if self.user.dpt_id else None
+        data["dpt_name"] = self.user.dpt.name if self.user.dpt else None
+        data["dpt_code"] = self.user.dpt.code if self.user.dpt else None
         return data
