@@ -1,17 +1,88 @@
+import logging
+from datetime import datetime
+
+from django.conf import settings
+from django.core.mail import EmailMessage
+from django.template.loader import render_to_string
 from rest_framework import generics, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
-from django.contrib.auth import authenticate
+
 from .models import User
 from .serializers import CreateUserSerializer, GateGuardTokenObtainPairSerializer, MeProfileSerializer
 from .permissions import IsSuperAdmin, IsSuperAdminOrDPTAdmin
 
+logger = logging.getLogger(__name__)
+
+
+def send_password_setup_email(user: User):
+    """
+    Send a welcome email with a one-time password setup link.
+    Falls back to printing to console if email is not configured.
+    """
+    try:
+        token = user.generate_password_setup_token()
+        user.save(update_fields=["password_setup_token", "password_setup_token_created", "must_change_password"])
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:8080").rstrip("/")
+        setup_url = f"{frontend_url}/setup-password?token={token}"
+
+        role_labels = {
+            User.Role.EMPLOYEE: "Employee",
+            User.Role.DPT_ADMIN: "Department Admin",
+            User.Role.GUARD: "Security Guard",
+        }
+
+        context = {
+            "name": user.get_full_name() or user.username,
+            "username": user.username,
+            "role_label": role_labels.get(user.role, user.role),
+            "department": user.dpt.name if user.dpt else None,
+            "setup_url": setup_url,
+            "year": datetime.now().year,
+        }
+
+        html_body = render_to_string("accounts/password_setup_email.html", context)
+
+        if not settings.EMAIL_HOST_USER:
+            # No email credentials configured → log to console for dev
+            logger.info(
+                "\n========== [GateGuard] New Account Password Setup ===========\n"
+                f"  User    : {user.username}\n"
+                f"  Name    : {context['name']}\n"
+                f"  Role    : {context['role_label']}\n"
+                f"  Email   : {user.email or '(no email set)'}\n"
+                f"  Link    : {setup_url}\n"
+                "==============================================================\n"
+            )
+            print(
+                f"\n[GateGuard] Password setup link for {user.username}: {setup_url}\n"
+            )
+            return
+
+        if not user.email:
+            logger.warning(f"User {user.username} has no email — skipping password setup email.")
+            return
+
+        email = EmailMessage(
+            subject="[GateGuard] Set Up Your Account Password",
+            body=html_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[user.email],
+        )
+        email.content_subtype = "html"
+        email.send(fail_silently=False)
+        logger.info(f"Password setup email sent to {user.email} for user {user.username}.")
+
+    except Exception as exc:
+        logger.error(f"Failed to send password setup email for {user.username}: {exc}")
+
 
 class LoginView(TokenObtainPairView):
-    """POST username + password -> access, refresh, role, user_id, dpt_id."""
+    """POST username + password → access, refresh, role, user_id, dpt_id, must_change_password."""
     serializer_class = GateGuardTokenObtainPairSerializer
 
 
@@ -29,9 +100,21 @@ class UserCreateView(generics.CreateAPIView):
                 raise ValidationError({"role": "Department admins can only create EMPLOYEE or GUARD users."})
 
             role = User.Role.GUARD if requested_role == User.Role.GUARD else User.Role.EMPLOYEE
-            serializer.save(role=role, dpt=requester.dpt)
+            user = serializer.save(role=role, dpt=requester.dpt, must_change_password=True)
         else:
-            serializer.save()
+            user = serializer.save(must_change_password=True)
+
+        # Send password setup email to the newly created user
+        send_password_setup_email(user)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        response.data["message"] = (
+            "Account created. A password setup email has been sent to the user."
+            if request.data.get("email")
+            else "Account created. No email on file — share the setup link manually."
+        )
+        return response
 
 
 class GuardCreateView(UserCreateView):
@@ -42,7 +125,8 @@ class GuardCreateView(UserCreateView):
         if not requester.is_dpt_admin:
             raise ValidationError({"detail": "Only department admins can create guards."})
 
-        serializer.save(role=User.Role.GUARD, dpt=requester.dpt)
+        user = serializer.save(role=User.Role.GUARD, dpt=requester.dpt, must_change_password=True)
+        send_password_setup_email(user)
 
 
 class UserListView(generics.ListAPIView):
@@ -75,13 +159,13 @@ class MeProfileView(generics.RetrieveUpdateAPIView):
 
 
 class ChangePasswordView(generics.GenericAPIView):
-    """Allows an authenticated user (or first-time login) to change their password securely."""
+    """Authenticated user changes their own password (also clears must_change_password flag)."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         user = request.user
-        current_password = request.data.get("current_password")
-        new_password = request.data.get("new_password")
+        current_password = request.data.get("current_password", "").strip()
+        new_password = request.data.get("new_password", "").strip()
 
         if not new_password or len(new_password) < 6:
             return Response(
@@ -89,6 +173,7 @@ class ChangePasswordView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # current_password check only needed if they already have a real password set
         if current_password and not user.check_password(current_password):
             return Response(
                 {"detail": "Current password is incorrect."},
@@ -96,12 +181,82 @@ class ChangePasswordView(generics.GenericAPIView):
             )
 
         user.set_password(new_password)
+        user.clear_password_setup_token()
         user.save()
-        return Response({"detail": "Password updated successfully."})
+        return Response({"detail": "Password updated successfully. You can now log in."})
+
+
+class SetupPasswordView(generics.GenericAPIView):
+    """
+    Unauthenticated endpoint: accepts a one-time token (from email) and sets a new password.
+    Used for first-time password setup by new employees and department admins.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        token = request.data.get("token", "").strip()
+        new_password = request.data.get("new_password", "").strip()
+
+        if not token:
+            return Response(
+                {"detail": "Setup token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not new_password or len(new_password) < 6:
+            return Response(
+                {"detail": "Password must be at least 6 characters long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(password_setup_token=token).first()
+        if not user:
+            return Response(
+                {"detail": "Invalid or expired setup link. Please contact your administrator."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not user.is_setup_token_valid(token):
+            return Response(
+                {"detail": "This setup link has expired (72 hours). Please contact your administrator for a new link."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.set_password(new_password)
+        user.clear_password_setup_token()
+        user.save()
+
+        return Response({
+            "detail": "Password set successfully. You can now log in.",
+            "username": user.username,
+            "role": user.role,
+        })
+
+
+class ResendSetupEmailView(generics.GenericAPIView):
+    """
+    Admin-only: resend the password setup email for a user who hasn't set up their account yet.
+    """
+    permission_classes = [IsSuperAdminOrDPTAdmin]
+
+    def post(self, request, *args, **kwargs):
+        username = request.data.get("username", "").strip()
+        if not username:
+            return Response({"detail": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(username__iexact=username).first()
+        if not user:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.is_super_admin:
+            return Response({"detail": "Cannot resend setup email for super admin."}, status=status.HTTP_403_FORBIDDEN)
+
+        send_password_setup_email(user)
+        return Response({"detail": f"Password setup email resent for {user.username}."})
 
 
 class ForgotPasswordResetView(generics.GenericAPIView):
-    """Allows employees/department admins to reset their password using their registered username/email and ID."""
+    """Unauthenticated: reset password by username/email (no token required — for cases where user already logged in before)."""
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
@@ -131,7 +286,6 @@ class ForgotPasswordResetView(generics.GenericAPIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Disallow superadmin reset from public endpoint for security
         if user.is_super_admin:
             return Response(
                 {"detail": "Super Admin password cannot be reset via this portal."},
@@ -145,5 +299,6 @@ class ForgotPasswordResetView(generics.GenericAPIView):
             )
 
         user.set_password(new_password)
+        user.clear_password_setup_token()
         user.save()
         return Response({"detail": "Password reset successfully. You can now log in with your new password."})

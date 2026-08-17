@@ -84,8 +84,9 @@ class MeProfileSerializer(serializers.ModelSerializer):
             "dpt_name",
             "dpt_code",
             "profile_image",
+            "must_change_password",
         ]
-        read_only_fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt"]
+        read_only_fields = ["id", "username", "first_name", "last_name", "email", "phone", "role", "dpt", "must_change_password"]
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -104,4 +105,5 @@ class GateGuardTokenObtainPairSerializer(TokenObtainPairSerializer):
         data["dpt_id"] = str(self.user.dpt_id) if self.user.dpt_id else None
         data["dpt_name"] = self.user.dpt.name if self.user.dpt else None
         data["dpt_code"] = self.user.dpt.code if self.user.dpt else None
+        data["must_change_password"] = self.user.must_change_password
         return data
