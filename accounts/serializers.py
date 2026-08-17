@@ -4,20 +4,48 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User
 
 
-def serialize_image_value(image_field):
+def serialize_image_value(image_field, request=None):
     if not image_field:
         return None
 
     if isinstance(image_field, str):
-        return image_field
+        url = image_field.strip()
+    else:
+        try:
+            url = image_field.url
+        except Exception:
+            return None
 
-    try:
-        url = image_field.url
-        if url.startswith("/") and settings.PUBLIC_URL:
-            return f"{settings.PUBLIC_URL}{url}"
-        return url
-    except Exception:
+    if not url:
         return None
+
+    # Data URLs or blob URLs
+    if url.startswith("data:") or url.startswith("blob:"):
+        return url
+
+    # Cloudinary URLs
+    if "cloudinary.com" in url or "res.cloudinary.com" in url:
+        return url
+
+    # Extract relative /media/ path
+    media_idx = url.find("/media/")
+    if media_idx != -1:
+        rel_path = url[media_idx:]
+    elif url.startswith("http://") or url.startswith("https://"):
+        return url
+    else:
+        rel_path = f"/media/{url.lstrip('/')}"
+
+    if request is not None:
+        try:
+            return request.build_absolute_uri(rel_path)
+        except Exception:
+            pass
+
+    if getattr(settings, "PUBLIC_URL", ""):
+        return f"{settings.PUBLIC_URL.rstrip('/')}{rel_path}"
+
+    return rel_path
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -35,7 +63,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        request = self.context.get("request")
+        ret["profile_image"] = serialize_image_value(instance.profile_image, request=request)
         return ret
 
 
@@ -61,7 +90,8 @@ class CreateUserSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        request = self.context.get("request")
+        ret["profile_image"] = serialize_image_value(instance.profile_image, request=request)
         return ret
 
 
@@ -90,7 +120,8 @@ class MeProfileSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        request = self.context.get("request")
+        ret["profile_image"] = serialize_image_value(instance.profile_image, request=request)
         return ret
 
 

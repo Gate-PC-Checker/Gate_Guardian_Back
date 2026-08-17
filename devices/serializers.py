@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from accounts.serializers import serialize_image_value
 from .models import PC
 
 
@@ -18,22 +19,7 @@ class PCSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "qr_token", "qr_image", "created_at", "updated_at"]
 
     def get_qr_image(self, obj):
-        if not obj.qr_image:
-            return None
-
-        try:
-            url = obj.qr_image.url
-        except Exception:
-            return None
-
-        if url.startswith("http://") or url.startswith("https://"):
-            return url
-
-        request = self.context.get("request")
-        if request is not None:
-            return request.build_absolute_uri(url)
-
-        return url
+        return serialize_image_value(obj.qr_image, request=self.context.get("request"))
 
 
 class PCLookupSerializer(serializers.ModelSerializer):
@@ -52,4 +38,6 @@ class PCLookupSerializer(serializers.ModelSerializer):
         ]
 
     def get_owner_photo(self, obj):
-        return None  # placeholder: hook up a profile photo field later if needed
+        if obj.owner and getattr(obj.owner, "profile_image", None):
+            return serialize_image_value(obj.owner.profile_image, request=self.context.get("request"))
+        return None

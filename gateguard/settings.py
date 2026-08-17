@@ -93,7 +93,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
-PUBLIC_URL = config("PUBLIC_URL", default="https://gateguard-backend-zzto.onrender.com")
+PUBLIC_URL = config("PUBLIC_URL", default="")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Cloudinary (image storage: QR codes + scan evidence photos) ---

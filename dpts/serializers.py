@@ -3,23 +3,8 @@ from rest_framework import serializers
 
 from accounts.models import User
 from accounts.views import send_password_setup_email
+from accounts.serializers import serialize_image_value
 from .models import Department
-
-
-def serialize_image_value(image_field):
-    if not image_field:
-        return None
-
-    if isinstance(image_field, str):
-        return image_field
-
-    try:
-        url = image_field.url
-        if url.startswith("/") and settings.PUBLIC_URL:
-            return f"{settings.PUBLIC_URL}{url}"
-        return url
-    except Exception:
-        return None
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -39,7 +24,8 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        ret["profile_image"] = serialize_image_value(instance.profile_image)
+        request = self.context.get("request")
+        ret["profile_image"] = serialize_image_value(instance.profile_image, request=request)
         return ret
 
 
