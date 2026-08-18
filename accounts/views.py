@@ -18,9 +18,9 @@ from .permissions import IsSuperAdmin, IsSuperAdminOrDPTAdmin
 logger = logging.getLogger(__name__)
 
 
-def send_password_setup_email(user: User):
+def send_password_setup_email(user: User, is_reset: bool = False):
     """
-    Send a welcome email with a one-time password setup link.
+    Send a welcome or password reset email with a one-time password setup/reset link.
     Falls back to printing to console if email is not configured.
     """
     try:
@@ -42,15 +42,17 @@ def send_password_setup_email(user: User):
             "role_label": role_labels.get(user.role, user.role),
             "department": user.dpt.name if user.dpt else None,
             "setup_url": setup_url,
+            "is_reset": is_reset,
             "year": datetime.now().year,
         }
 
         html_body = render_to_string("accounts/password_setup_email.html", context)
+        subject = "[GateGuard] Reset Your Account Password" if is_reset else "[GateGuard] Set Up Your Account Password"
 
         if not settings.EMAIL_HOST_USER:
             # No email credentials configured → log to console for dev
             logger.info(
-                "\n========== [GateGuard] New Account Password Setup ===========\n"
+                "\n========== [GateGuard] Password Reset / Setup ===========\n"
                 f"  User    : {user.username}\n"
                 f"  Name    : {context['name']}\n"
                 f"  Role    : {context['role_label']}\n"
@@ -59,26 +61,26 @@ def send_password_setup_email(user: User):
                 "==============================================================\n"
             )
             print(
-                f"\n[GateGuard] Password setup link for {user.username}: {setup_url}\n"
+                f"\n[GateGuard] Password {'reset' if is_reset else 'setup'} link for {user.username}: {setup_url}\n"
             )
             return
 
         if not user.email:
-            logger.warning(f"User {user.username} has no email — skipping password setup email.")
+            logger.warning(f"User {user.username} has no email — skipping password reset/setup email.")
             return
 
         email = EmailMessage(
-            subject="[GateGuard] Set Up Your Account Password",
+            subject=subject,
             body=html_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[user.email],
         )
         email.content_subtype = "html"
         email.send(fail_silently=False)
-        logger.info(f"Password setup email sent to {user.email} for user {user.username}.")
+        logger.info(f"Password reset/setup email sent to {user.email} for user {user.username}.")
 
     except Exception as exc:
-        logger.error(f"Failed to send password setup email for {user.username}: {exc}")
+        logger.error(f"Failed to send password setup/reset email for {user.username}: {exc}")
 
 
 class LoginView(TokenObtainPairView):
@@ -138,6 +140,29 @@ class UserListView(generics.ListAPIView):
         if requester.is_super_admin:
             return User.objects.all().order_by("-date_joined")
         return User.objects.filter(dpt=requester.dpt).order_by("-date_joined")
+
+
+class UserDetailDestroyView(generics.RetrieveDestroyAPIView):
+    """
+    Super Admin can delete any user.
+    Department Admin can delete Employee or Guard users in their department.
+    """
+    serializer_class = CreateUserSerializer
+    permission_classes = [IsSuperAdminOrDPTAdmin]
+
+    def get_queryset(self):
+        requester = self.request.user
+        if requester.is_super_admin:
+            return User.objects.all()
+        return User.objects.filter(dpt=requester.dpt).exclude(role=User.Role.SUPER_ADMIN)
+
+    def perform_destroy(self, instance):
+        requester = self.request.user
+        if instance.id == requester.id:
+            raise ValidationError({"detail": "You cannot delete your own account."})
+        if requester.is_dpt_admin and instance.role == User.Role.DPT_ADMIN and instance.id != requester.id:
+            raise ValidationError({"detail": "Department admins cannot delete other department admins."})
+        instance.delete()
 
 
 class MeProfileView(generics.RetrieveUpdateAPIView):
@@ -256,32 +281,52 @@ class ResendSetupEmailView(generics.GenericAPIView):
 
 
 class ForgotPasswordResetView(generics.GenericAPIView):
-    """Unauthenticated: reset password by username/email (no token required — for cases where user already logged in before)."""
+    """
+    Unauthenticated endpoint: Sends a secure password reset email link.
+    POST /api/auth/forgot-password/
+    Body: { "identifier": "username_or_email" }
+    """
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
-        identifier = request.data.get("identifier", "").strip()
-        email = request.data.get("email", "").strip()
+        identifier = (
+            request.data.get("identifier")
+            or request.data.get("email")
+            or request.data.get("username")
+            or ""
+        ).strip()
         new_password = request.data.get("new_password", "").strip()
+        token = request.data.get("token", "").strip()
 
-        if not identifier or not new_password:
+        if not identifier and not token:
             return Response(
-                {"detail": "Please provide your username/ID and a new password."},
+                {"detail": "Please provide your username or registered email address."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if len(new_password) < 6:
-            return Response(
-                {"detail": "Password must be at least 6 characters long."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # If token and new_password are provided directly (e.g. from reset link web form)
+        if token and new_password:
+            if len(new_password) < 6:
+                return Response(
+                    {"detail": "Password must be at least 6 characters long."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user = User.objects.filter(password_setup_token=token).first()
+            if not user or not user.is_setup_token_valid(token):
+                return Response(
+                    {"detail": "Invalid or expired password reset link."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.set_password(new_password)
+            user.clear_password_setup_token()
+            user.save()
+            return Response({"detail": "Password reset successfully. You can now log in."})
 
         # Flexible account lookup by username, email, or department code
         user = (
             User.objects.filter(username__iexact=identifier).first()
             or User.objects.filter(email__iexact=identifier).first()
             or User.objects.filter(dpt__code__iexact=identifier, role=User.Role.DPT_ADMIN).first()
-            or (User.objects.filter(email__iexact=email).first() if email else None)
         )
 
         if not user:
@@ -296,13 +341,26 @@ class ForgotPasswordResetView(generics.GenericAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if email and user.email and user.email.strip().lower() != email.strip().lower():
+        if not user.email:
             return Response(
-                {"detail": "The provided email does not match our records for this ID."},
+                {"detail": "No email address is associated with this account. Please contact your department administrator to set your password."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user.set_password(new_password)
-        user.clear_password_setup_token()
-        user.save()
-        return Response({"detail": "Password reset successfully. You can now log in with your new password."})
+        # Send password reset email
+        send_password_setup_email(user, is_reset=True)
+
+        # Mask email for privacy (e.g. j***e@example.com)
+        parts = user.email.split("@")
+        if len(parts) == 2:
+            uname, domain = parts
+            masked_uname = uname[0] + "***" + (uname[-1] if len(uname) > 1 else "")
+            masked_email = f"{masked_uname}@{domain}"
+        else:
+            masked_email = user.email
+
+        return Response({
+            "detail": f"A password reset link has been sent to your email ({masked_email}). Please open your email, reset your password, and then return to log in.",
+            "email_sent": True,
+            "username": user.username,
+        })

@@ -27,14 +27,14 @@ class GuestPassCheckInView(APIView):
         serializer = GuestPassCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         guest_pass = serializer.save(guard=request.user)
-        pass_data = GuestPassSerializer(guest_pass).data
+        pass_data = GuestPassSerializer(guest_pass, context={"request": request}).data
         return Response(
             {
                 "pass_id": guest_pass.pass_id,
                 "guest_name": guest_pass.guest_name,
                 "guest_id_doc": guest_pass.guest_id_doc,
                 "serial_number": guest_pass.serial_number,
-                "id_photo_url": pass_data.get("id_photo_url") or (guest_pass.id_photo.url if guest_pass.id_photo else None),
+                "id_photo_url": pass_data.get("id_photo_url") or pass_data.get("id_photo"),
                 "checked_in_at": guest_pass.checked_in_at,
                 "message": (
                     f"Guest registered. Unique Pass ID is '{guest_pass.pass_id}'."
@@ -61,7 +61,7 @@ class GuestPassLookupView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        data = GuestPassSerializer(guest_pass).data
+        data = GuestPassSerializer(guest_pass, context={"request": request}).data
         return Response(data, status=status.HTTP_200_OK)
 
 
@@ -121,7 +121,7 @@ class GuestPassCheckOutView(APIView):
                 "flagged_as_stolen": is_stolen,
                 "checked_out_at": guest_pass.checked_out_at,
                 "message": msg,
-                "details": GuestPassSerializer(guest_pass).data,
+                "details": GuestPassSerializer(guest_pass, context={"request": request}).data,
             },
             status=status.HTTP_200_OK,
         )

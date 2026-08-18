@@ -1,3 +1,4 @@
+from accounts.serializers import serialize_image_value
 from rest_framework import serializers
 from .models import GuestPass
 
@@ -46,12 +47,15 @@ class GuestPassSerializer(serializers.ModelSerializer):
         return None
 
     def get_id_photo_url(self, obj):
-        if obj.id_photo:
-            try:
-                return obj.id_photo.url
-            except Exception:
-                return None
-        return None
+        request = self.context.get("request")
+        return serialize_image_value(obj.id_photo, request=request)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get("request")
+        ret["id_photo"] = serialize_image_value(instance.id_photo, request=request)
+        ret["id_photo_url"] = ret["id_photo"]
+        return ret
 
 
 class GuestPassCheckOutSerializer(serializers.Serializer):

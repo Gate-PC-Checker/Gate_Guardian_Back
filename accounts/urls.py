@@ -10,6 +10,7 @@ from .views import (
     SetupPasswordView,
     ResendSetupEmailView,
     ForgotPasswordResetView,
+    UserDetailDestroyView,
 )
 
 urlpatterns = [
@@ -17,6 +18,7 @@ urlpatterns = [
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("me/", MeProfileView.as_view(), name="me-profile"),
     path("users/", UserListView.as_view(), name="user-list"),
+    path("users/<uuid:pk>/", UserDetailDestroyView.as_view(), name="user-detail-destroy"),
     path("users/create/", UserCreateView.as_view(), name="user-create"),
     path("guards/create/", GuardCreateView.as_view(), name="guard-create"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
