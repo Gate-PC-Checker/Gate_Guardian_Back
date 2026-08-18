@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 
 from django.conf import settings
@@ -16,6 +17,25 @@ from .serializers import CreateUserSerializer, GateGuardTokenObtainPairSerialize
 from .permissions import IsSuperAdmin, IsSuperAdminOrDPTAdmin
 
 logger = logging.getLogger(__name__)
+
+
+def validate_strong_password(password: str) -> None:
+    """
+    Enforces a strong password policy:
+    - At least 8 characters
+    - Must contain at least one letter (a-z or A-Z)
+    - Must contain at least one number or special character
+    - Disallow trivial common passwords
+    """
+    if not password or len(password) < 8:
+        raise ValidationError({"detail": "Password must be at least 8 characters long."})
+    if not re.search(r"[A-Za-z]", password):
+        raise ValidationError({"detail": "Password must contain at least one letter."})
+    if not re.search(r"[0-9!@#$%^&*(),.?\":{}|<>\-_]", password):
+        raise ValidationError({"detail": "Password must contain at least one number or symbol."})
+    if password.lower() in {"password", "12345678", "password123", "gateguard", "admin123"}:
+        raise ValidationError({"detail": "This password is too common. Please choose a more secure password."})
+
 
 
 def send_password_setup_email(user: User, is_reset: bool = False):
@@ -188,15 +208,18 @@ class ChangePasswordView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        user = request.user
         current_password = request.data.get("current_password", "").strip()
         new_password = request.data.get("new_password", "").strip()
 
-        if not new_password or len(new_password) < 6:
+        if not new_password:
             return Response(
-                {"detail": "New password must be at least 6 characters long."},
+                {"detail": "New password is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        validate_strong_password(new_password)
+
+        user = request.user
 
         # current_password check only needed if they already have a real password set
         if current_password and not user.check_password(current_password):
@@ -228,11 +251,7 @@ class SetupPasswordView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not new_password or len(new_password) < 6:
-            return Response(
-                {"detail": "Password must be at least 6 characters long."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        validate_strong_password(new_password)
 
         user = User.objects.filter(password_setup_token=token).first()
         if not user:
@@ -306,11 +325,7 @@ class ForgotPasswordResetView(generics.GenericAPIView):
 
         # If token and new_password are provided directly (e.g. from reset link web form)
         if token and new_password:
-            if len(new_password) < 6:
-                return Response(
-                    {"detail": "Password must be at least 6 characters long."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            validate_strong_password(new_password)
             user = User.objects.filter(password_setup_token=token).first()
             if not user or not user.is_setup_token_valid(token):
                 return Response(

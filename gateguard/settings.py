@@ -155,14 +155,20 @@ CORS_ALLOW_CREDENTIALS = config("CORS_ALLOW_CREDENTIALS", default=True, cast=boo
 # Needed for admin/login POSTs from trusted HTTPS domains.
 CSRF_TRUSTED_ORIGINS = config("CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
 
-# --- Email Configuration ---
+# --- Security Headers & Injection Protection ---
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+
+# --- Email Configuration (Gmail SMTP) ---
 EMAIL_BACKEND = config("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = config("EMAIL_HOST", default="smtp.gmail.com")
 EMAIL_PORT = config("EMAIL_PORT", default=587, cast=int)
 EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
-EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
-EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="GateGuard <noreply@gateguard.com>")
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="mekdelawitkassa6@gmail.com")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="etqafvkiqnuojnrd")
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="GateGuard <mekdelawitkassa6@gmail.com>")
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:8080")
 
 # Fix macOS Python SSL cert verification for SMTP email sending
