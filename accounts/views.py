@@ -98,9 +98,11 @@ def send_password_setup_email(user: User, is_reset: bool = False):
         email.content_subtype = "html"
         email.send(fail_silently=False)
         logger.info(f"Password reset/setup email sent to {user.email} for user {user.username}.")
+        return True
 
     except Exception as exc:
         logger.error(f"Failed to send password setup/reset email for {user.username}: {exc}")
+        raise RuntimeError(f"Email send failed: {exc}") from exc
 
 
 class LoginView(TokenObtainPairView):
@@ -126,16 +128,31 @@ class UserCreateView(generics.CreateAPIView):
         else:
             user = serializer.save(must_change_password=True)
 
-        # Send password setup email to the newly created user
-        send_password_setup_email(user)
+        # Send password setup email — store result for use in create()
+        self._email_sent = False
+        self._email_error = None
+        try:
+            send_password_setup_email(user)
+            self._email_sent = True
+        except RuntimeError as exc:
+            self._email_error = str(exc)
+            logger.error(f"Email send error for new user {user.username}: {exc}")
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
-        response.data["message"] = (
-            "Account created. A password setup email has been sent to the user."
-            if request.data.get("email")
-            else "Account created. No email on file — share the setup link manually."
-        )
+        email_sent = getattr(self, "_email_sent", False)
+        email_error = getattr(self, "_email_error", None)
+
+        if email_error:
+            response.data["message"] = f"Account created, but email could not be sent: {email_error}. Please use 'Resend Setup Email' from the dashboard."
+            response.data["email_sent"] = False
+            response.data["email_error"] = email_error
+        elif email_sent:
+            response.data["message"] = "Account created. A password setup email has been sent to the user."
+            response.data["email_sent"] = True
+        else:
+            response.data["message"] = "Account created. No email on file — share the setup link manually."
+            response.data["email_sent"] = False
         return response
 
 
@@ -148,7 +165,14 @@ class GuardCreateView(UserCreateView):
             raise ValidationError({"detail": "Only department admins can create guards."})
 
         user = serializer.save(role=User.Role.GUARD, dpt=requester.dpt, must_change_password=True)
-        send_password_setup_email(user)
+        self._email_sent = False
+        self._email_error = None
+        try:
+            send_password_setup_email(user)
+            self._email_sent = True
+        except RuntimeError as exc:
+            self._email_error = str(exc)
+            logger.error(f"Email send error for new guard {user.username}: {exc}")
 
 
 class UserListView(generics.ListAPIView):
@@ -280,23 +304,47 @@ class SetupPasswordView(generics.GenericAPIView):
 class ResendSetupEmailView(generics.GenericAPIView):
     """
     Admin-only: resend the password setup email for a user who hasn't set up their account yet.
+    Accepts either { "username": "..." } or { "user_id": "<uuid>" }.
     """
     permission_classes = [IsSuperAdminOrDPTAdmin]
 
     def post(self, request, *args, **kwargs):
         username = request.data.get("username", "").strip()
-        if not username:
-            return Response({"detail": "Username is required."}, status=status.HTTP_400_BAD_REQUEST)
+        user_id = request.data.get("user_id", "").strip()
 
-        user = User.objects.filter(username__iexact=username).first()
+        if not username and not user_id:
+            return Response({"detail": "Provide either 'username' or 'user_id'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user_id:
+            user = User.objects.filter(id=user_id).first()
+        else:
+            user = User.objects.filter(username__iexact=username).first()
+
         if not user:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
         if user.is_super_admin:
             return Response({"detail": "Cannot resend setup email for super admin."}, status=status.HTTP_403_FORBIDDEN)
 
-        send_password_setup_email(user)
-        return Response({"detail": f"Password setup email resent for {user.username}."})
+        # DPT admin can only resend for users in their own department
+        if request.user.is_dpt_admin and user.dpt_id != request.user.dpt_id:
+            return Response({"detail": "You can only resend emails for users in your department."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not user.email:
+            return Response(
+                {"detail": f"User {user.username} has no email address. Please update their profile first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            send_password_setup_email(user, is_reset=user.must_change_password)
+        except RuntimeError as exc:
+            return Response(
+                {"detail": f"Failed to send email: {exc}. Check SMTP configuration."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({"detail": f"Password setup email sent to {user.email} for {user.username}."})
 
 
 class ForgotPasswordResetView(generics.GenericAPIView):
