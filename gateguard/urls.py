@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/dpts/", include("dpts.urls")),
     path("api/devices/", include("devices.urls")),
     path("api/scans/", include("scans.urls")),
+    path("api/guests/", include("guests.urls")),
     path("guard-scanner/", TemplateView.as_view(template_name="guard_scanner.html"), name="guard-scanner"),
 ]
 
