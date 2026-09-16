@@ -62,5 +62,5 @@ class DepartmentRegisterSerializer(serializers.Serializer):
             must_change_password=True,
         )
         user.save()
-        send_password_setup_email(user)
-        return {"department": department, "user": user}
+        sent, setup_url, error = send_password_setup_email(user)
+        return {"department": department, "user": user, "setup_url": setup_url, "email_sent": sent}

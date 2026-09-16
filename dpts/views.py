@@ -16,8 +16,12 @@ class DepartmentRegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         result = serializer.save()
         department = result["department"]
+        data = DepartmentSerializer(department, context={"request": request}).data
+        if "setup_url" in result and result["setup_url"]:
+            data["setup_url"] = result["setup_url"]
+            data["email_sent"] = result.get("email_sent", False)
         return Response(
-            DepartmentSerializer(department).data,
+            data,
             status=status.HTTP_201_CREATED,
         )
 

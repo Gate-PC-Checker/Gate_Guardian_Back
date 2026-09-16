@@ -41,68 +41,110 @@ def validate_strong_password(password: str) -> None:
 def send_password_setup_email(user: User, is_reset: bool = False):
     """
     Send a welcome or password reset email with a one-time password setup/reset link.
-    Falls back to printing to console if email is not configured.
+    Supports HTTP-based APIs (Brevo, Resend) to bypass SMTP port blocking on hosts like Render.
+    Always generates and saves the setup token, and returns (email_sent: bool, setup_url: str, error: str | None).
     """
-    try:
-        token = user.generate_password_setup_token()
-        user.save(update_fields=["password_setup_token", "password_setup_token_created", "must_change_password"])
+    token = user.generate_password_setup_token()
+    user.save(update_fields=["password_setup_token", "password_setup_token_created", "must_change_password"])
 
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:8080").rstrip("/")
-        setup_url = f"{frontend_url}/setup-password?token={token}"
+    frontend_url = getattr(settings, "FRONTEND_URL", "https://front-end-chi-gold.vercel.app").rstrip("/")
+    setup_url = f"{frontend_url}/setup-password?token={token}"
 
-        role_labels = {
-            User.Role.EMPLOYEE: "Employee",
-            User.Role.DPT_ADMIN: "Department Admin",
-            User.Role.GUARD: "Security Guard",
-        }
+    role_labels = {
+        User.Role.EMPLOYEE: "Employee",
+        User.Role.DPT_ADMIN: "Department Admin",
+        User.Role.GUARD: "Security Guard",
+    }
 
-        context = {
-            "name": user.get_full_name() or user.username,
-            "username": user.username,
-            "role_label": role_labels.get(user.role, user.role),
-            "department": user.dpt.name if user.dpt else None,
-            "setup_url": setup_url,
-            "is_reset": is_reset,
-            "year": datetime.now().year,
-        }
+    context = {
+        "name": user.get_full_name() or user.username,
+        "username": user.username,
+        "role_label": role_labels.get(user.role, user.role),
+        "department": user.dpt.name if user.dpt else None,
+        "setup_url": setup_url,
+        "is_reset": is_reset,
+        "year": datetime.now().year,
+    }
 
-        html_body = render_to_string("accounts/password_setup_email.html", context)
-        subject = "[GateGuard] Reset Your Account Password" if is_reset else "[GateGuard] Set Up Your Account Password"
+    html_body = render_to_string("accounts/password_setup_email.html", context)
+    subject = "[GateGuard] Reset Your Account Password" if is_reset else "[GateGuard] Set Up Your Account Password"
 
-        if not settings.EMAIL_HOST_USER:
-            # No email credentials configured → log to console for dev
-            logger.info(
-                "\n========== [GateGuard] Password Reset / Setup ===========\n"
-                f"  User    : {user.username}\n"
-                f"  Name    : {context['name']}\n"
-                f"  Role    : {context['role_label']}\n"
-                f"  Email   : {user.email or '(no email set)'}\n"
-                f"  Link    : {setup_url}\n"
-                "==============================================================\n"
+    if not user.email:
+        logger.warning(f"User {user.username} has no email — skipping email delivery.")
+        return False, setup_url, "User has no email"
+
+    # 1. Try Brevo HTTPS API if key configured
+    brevo_key = getattr(settings, "BREVO_API_KEY", "")
+    if brevo_key:
+        try:
+            import json, urllib.request
+            req = urllib.request.Request(
+                "https://api.brevo.com/v3/smtp/email",
+                data=json.dumps({
+                    "sender": {"name": "GateGuard", "email": getattr(settings, "EMAIL_HOST_USER", "mekdelawitkassa6@gmail.com")},
+                    "to": [{"email": user.email, "name": context["name"]}],
+                    "subject": subject,
+                    "htmlContent": html_body,
+                }).encode("utf-8"),
+                headers={
+                    "api-key": brevo_key,
+                    "Content-Type": "application/json",
+                    "User-Agent": "GateGuard/1.0",
+                },
+                method="POST",
             )
-            print(
-                f"\n[GateGuard] Password {'reset' if is_reset else 'setup'} link for {user.username}: {setup_url}\n"
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status in (200, 201):
+                    logger.info(f"Password reset/setup email sent via Brevo to {user.email}.")
+                    return True, setup_url, None
+        except Exception as exc:
+            logger.error(f"Brevo email failed: {exc}")
+
+    # 2. Try Resend HTTPS API if key configured
+    resend_key = getattr(settings, "RESEND_API_KEY", "")
+    if resend_key:
+        try:
+            import json, urllib.request
+            req = urllib.request.Request(
+                "https://api.resend.com/emails",
+                data=json.dumps({
+                    "from": getattr(settings, "DEFAULT_FROM_EMAIL", "GateGuard <onboarding@resend.dev>"),
+                    "to": [user.email],
+                    "subject": subject,
+                    "html": html_body,
+                }).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {resend_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "GateGuard/1.0",
+                },
+                method="POST",
             )
-            return
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status in (200, 201):
+                    logger.info(f"Password reset/setup email sent via Resend to {user.email}.")
+                    return True, setup_url, None
+        except Exception as exc:
+            logger.error(f"Resend email failed: {exc}")
 
-        if not user.email:
-            logger.warning(f"User {user.username} has no email — skipping password reset/setup email.")
-            return
+    # 3. Try standard Django SMTP (with timeout handling)
+    if getattr(settings, "EMAIL_HOST_USER", None):
+        try:
+            email = EmailMessage(
+                subject=subject,
+                body=html_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email],
+            )
+            email.content_subtype = "html"
+            email.send(fail_silently=False)
+            logger.info(f"Password reset/setup email sent via SMTP to {user.email}.")
+            return True, setup_url, None
+        except Exception as exc:
+            logger.warning(f"SMTP send failed (often blocked by host firewall on ports 25/465/587): {exc}")
+            return False, setup_url, str(exc)
 
-        email = EmailMessage(
-            subject=subject,
-            body=html_body,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[user.email],
-        )
-        email.content_subtype = "html"
-        email.send(fail_silently=False)
-        logger.info(f"Password reset/setup email sent to {user.email} for user {user.username}.")
-        return True
-
-    except Exception as exc:
-        logger.error(f"Failed to send password setup/reset email for {user.username}: {exc}")
-        raise RuntimeError(f"Email send failed: {exc}") from exc
+    return False, setup_url, "No email provider configured"
 
 
 class LoginView(TokenObtainPairView):
@@ -128,31 +170,25 @@ class UserCreateView(generics.CreateAPIView):
         else:
             user = serializer.save(must_change_password=True)
 
-        # Send password setup email — store result for use in create()
-        self._email_sent = False
-        self._email_error = None
-        try:
-            send_password_setup_email(user)
-            self._email_sent = True
-        except RuntimeError as exc:
-            self._email_error = str(exc)
-            logger.error(f"Email send error for new user {user.username}: {exc}")
+        sent, setup_url, error = send_password_setup_email(user)
+        self._email_sent = sent
+        self._setup_url = setup_url
+        self._email_error = error
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
         email_sent = getattr(self, "_email_sent", False)
+        setup_url = getattr(self, "_setup_url", None)
         email_error = getattr(self, "_email_error", None)
 
-        if email_error:
-            response.data["message"] = f"Account created, but email could not be sent: {email_error}. Please use 'Resend Setup Email' from the dashboard."
-            response.data["email_sent"] = False
-            response.data["email_error"] = email_error
-        elif email_sent:
+        response.data["setup_url"] = setup_url
+        response.data["email_sent"] = email_sent
+        if email_sent:
             response.data["message"] = "Account created. A password setup email has been sent to the user."
-            response.data["email_sent"] = True
         else:
-            response.data["message"] = "Account created. No email on file — share the setup link manually."
-            response.data["email_sent"] = False
+            response.data["message"] = "Account created. Setup link generated — you can copy and share it directly."
+            if email_error:
+                response.data["email_error"] = email_error
         return response
 
 
@@ -165,14 +201,11 @@ class GuardCreateView(UserCreateView):
             raise ValidationError({"detail": "Only department admins can create guards."})
 
         user = serializer.save(role=User.Role.GUARD, dpt=requester.dpt, must_change_password=True)
-        self._email_sent = False
-        self._email_error = None
-        try:
-            send_password_setup_email(user)
-            self._email_sent = True
-        except RuntimeError as exc:
-            self._email_error = str(exc)
-            logger.error(f"Email send error for new guard {user.username}: {exc}")
+        sent, setup_url, error = send_password_setup_email(user)
+        self._email_sent = sent
+        self._setup_url = setup_url
+        self._email_error = error
+
 
 
 class UserListView(generics.ListAPIView):
@@ -336,15 +369,20 @@ class ResendSetupEmailView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            send_password_setup_email(user, is_reset=user.must_change_password)
-        except RuntimeError as exc:
-            return Response(
-                {"detail": f"Failed to send email: {exc}. Check SMTP configuration."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        sent, setup_url, error = send_password_setup_email(user, is_reset=user.must_change_password)
+        if not sent:
+            return Response({
+                "detail": "Setup link generated. You can copy and share it directly with the user.",
+                "setup_url": setup_url,
+                "email_sent": False,
+                "email_error": error,
+            })
 
-        return Response({"detail": f"Password setup email sent to {user.email} for {user.username}."})
+        return Response({
+            "detail": f"Password setup email sent to {user.email} for {user.username}.",
+            "setup_url": setup_url,
+            "email_sent": True,
+        })
 
 
 class ForgotPasswordResetView(generics.GenericAPIView):
